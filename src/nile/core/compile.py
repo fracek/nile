@@ -2,6 +2,8 @@
 import logging
 import os
 import subprocess
+from pkg_resources import iter_entry_points
+
 
 from nile.common import (
     ABIS_DIRECTORY,
@@ -27,7 +29,15 @@ def compile(contracts):
         )
         all_contracts = get_all_contracts()
 
-    results = [_compile_contract(contract) for contract in all_contracts]
+    # load entry-points for nile.before_compile
+    # It should filter by entry-point name, with a list provided by the user
+    # to avoid running code that the user installed maybe without knowing.
+    before_compile_callbacks = [
+        entry.load()
+        for entry in iter_entry_points("nile.before_compile")
+    ]
+
+    results = [_compile_contract(contract, before_compile_callbacks) for contract in all_contracts]
     failed_contracts = [c for (c, r) in zip(all_contracts, results) if r != 0]
     failures = len(failed_contracts)
 
@@ -42,10 +52,14 @@ def compile(contracts):
             logging.info(f"   {contract}")
 
 
-def _compile_contract(path):
+def _compile_contract(path, callbacks):
     base = os.path.basename(path)
     filename = os.path.splitext(base)[0]
     logging.info(f"🔨 Compiling {path}")
+
+    # Call the callbacks
+    for callback in callbacks:
+        callback(path)
 
     cmd = f"""
     starknet-compile {path} \
